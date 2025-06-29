@@ -7,6 +7,9 @@ from typing import Dict, List
 
 app = FastAPI()
 
+# from api.intent import router as intent_router
+from api.upload import router as upload_router
+
 @app.get("/")
 async def read_root():
     return {"message": "Hello World"}
@@ -38,6 +41,9 @@ def ask_ollama(request: MessageRequest):
         return {"response": result.get("response")}
     except requests.RequestException as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# Include the upload router
+app.include_router(upload_router)
 
 # In-memory store for chat history (for demo purposes)
 chat_histories: Dict[str, List[Dict[str, str]]] = {}
