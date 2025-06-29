@@ -120,4 +120,6 @@ dmypy.json
 #Pycharm IDE
 .idea
 
-models/intent_models/*.pt
+*.pt
+
+data/uploads/*/*
