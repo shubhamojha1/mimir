@@ -176,3 +176,103 @@ class RAGService:
         except Exception as e:
             logger.error(f"Failed to add document {document_id} to RAG index: {e}")
             return False
+        
+    def _create_chunks(self, content: str) -> List[str]:
+        """
+        Split content into overlapping chunks for better retrieval.
+        
+        Chunking is crucial for RAG because it allows us to find specific relevant
+        sections within large documents. The overlap ensures that important information
+        spanning chunk boundaries isn't lost.
+        """
+        chunk_size = self.settings.rag_chunk_size
+        overlap = self.settings.rag_chunk_overlap
+
+        chunks = []
+        start = 0
+
+        while start < len(content):
+            end = start + chunk_size
+            chunk = content[start:end]
+
+            # if not at end, try to break at a word boundary
+            if end < len(content):
+                last_space = chunk.rfind(' ')
+                if last_space > chunk_size * 0.8: # break only if we dont lose too much content
+                    chunk = chunk[:last_space]
+                    end = start + last_space
+
+            chunks.append(chunk.strip())
+            start = end - overlap
+
+            # prevent infinite loop
+            if start >= len(content):
+                break
+
+        return [chunk for chunk in chunks if chunk.strip()]
+    
+    async def retrieve_relevant_context(self, 
+                                        query: str, 
+                                        filters: Optional[Dict[ str, Any]] = None,
+                                        max_results: Optional[int] = None) -> List[RAGContext]:
+        """
+        Retrieve the most relevant document chunks for a given query.
+        
+        This is the "Retrieval" part of RAG. We convert the query to a vector embedding
+        and find the most semantically similar chunks in our database.
+        
+        Args:
+            query: The user's question or search query
+            filters: Optional filters (e.g., subject, document type, date range)
+            max_results: Maximum number of results to return
+        
+        Returns:
+            List of RAGContext objects containing relevant document chunks
+        """
+        try:
+            # generate embedding for the query
+            query_embedding = self.embedding_model.encode(query).tolist()
+
+            # determine number of results to review
+            n_results = max_results or self.settings.rag_max_results
+
+            # build ChromaDB query params
+            query_params = {
+                "query_embeddings": [query_embedding],
+                "n_results": n_results
+            }
+
+            # add filters if provided
+            if filters:
+                query_params["where"] = filters
+
+            # query ChromaDB for similar chunks
+            results = self.collection.query(**query_params)
+
+            # convert resilts to RAGContext objects
+            contexts = []
+            for i in range(len(results["documents"][0])):
+                context = RAGContext(
+                    content=results["documents"][0][i],
+                    source_document=results["metadatas"][0][i].get("source_file", "Unknown"),
+                    chunk_id=results["ids"][0][i],
+                    similarity_score=1.0 - results["distances"][0][i],  # Convert distance to similarity
+                    metadata=results["metadatas"][0][i],
+                    timestamp=datetime.now()
+                )
+
+                # only include results above similarity threshold
+                if context.similarity_score >= self.settings.rag_similarity_threshold:
+                    contexts.append(context)
+
+            logger.info(f"Retrieved {len(contexts)} relevatn contexts for query: {query[:50]}...")
+            return contexts
+        except Exception as e:
+            logger.error(f"Failed to retrieve relevant context: {e}")
+            return []
+        
+    async def generate_rag_response(self,
+                                    query: str,
+                                    contexts: List[RAGContext],
+                                    agent_type: Optional[str] = None) -> RAGResponse:
+        
