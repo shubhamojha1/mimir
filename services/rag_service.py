@@ -275,4 +275,206 @@ class RAGService:
                                     query: str,
                                     contexts: List[RAGContext],
                                     agent_type: Optional[str] = None) -> RAGResponse:
+        """
+        Generate a response using retrieved context and LLM.
         
+        This is the "Generation" part of RAG. We combine the user's query with
+        relevant context from their documents and ask the LLM to generate a
+        comprehensive, grounded answer.
+        
+        Args:
+            query: The user's question
+            contexts: Relevant document chunks retrieved earlier
+            agent_type: Optional agent specialization (math, science, etc.)
+        
+        Returns:
+            RAGResponse containing the answer and source information
+        """
+        start_time = datetime.now()
+        try:
+            # build context string from retrieved chunks
+            context_text = self._build_context_text(contexts)
+
+            # select appropriate prompt based on agent type
+            system_prompt = self.prompts.get_rag_system_prompt(agent_type)
+            user_prompt = self.prompts.get_rag_user_prompt(query, context_text)
+
+            # generate response using configured LLM
+            answer = await self._generate_llm_response(system_prompt, user_prompt)
+
+            # calculate confidence score based on context relevance
+            confidence_score = self._calculate_confidence_score(contexts)
+
+            processing_time = (datetime.now() - start_time).total_seconds()
+
+            response = RAGResponse(
+                answer=answer,
+                sources=contexts,
+                query=query,
+                confidence_score=confidence_score,
+                processing_time=processing_time
+            )
+
+            logger.info(f"Generated RAG response in {processing_time:.2f}s with confidence {confidence_score:.2f}")
+            return response
+
+        except Exception as e:
+            logger.error(f"Failed to generate RAG response: {e}")
+            return RAGResponse(
+                answer="I'm sorry, but I encountered an error while processing your request. Please try again.",
+                sources=[],
+                query=query,
+                confidence_score=0.0,
+                processing_time=(datetime.now() - start_time).total_seconds()                
+            )
+    
+    def _build_context_text(self, contexts: List[RAGContext]) -> str:
+        """
+        Combine retrieved contexts into a single text block for the LLM.
+        
+        This step is crucial because it determines how much context the LLM sees
+        and how it's formatted. We include source information to maintain transparency.
+        """
+        if not contexts:
+            return "No relevant context found in your documents."
+        
+        context_parts = []
+        for i, context in enumerate(contexts, 1):
+            context_part = f"[Source {i}: {context.source_document}]\n{context.content}\n"
+            context_parts.append(context_part)
+
+        return "\n".join(context_parts)
+    
+    async def _generate_llm_response(self, system_prompt, user_prompt) -> str:
+        """
+        Generate response using the configured LLM provider.
+        
+        This method abstracts away the differences between various LLM providers,
+        allowing Mimir to work with OpenAI, Anthropic, or local models seamlessly.
+        """
+        if self.settings.llm_provider == "openai":
+            return await self._generate_openai_response(system_prompt, user_prompt)
+        elif self.settings.llm_provider == "anthropic":
+            return await self._generate_anthropic_response(system_prompt, user_prompt)
+        elif self.settings.llm_provider == "ollama":
+            return await self._generate_ollama_response(system_prompt, user_prompt)
+        else:
+            raise ValueError(f"Unsupported LLM provider: {self.settings.llm_provider}")
+        
+    async def _generate_openai_response(self, system_prompt: str, user_prompt: str) -> str:
+        """Generate response using OpenAI's API."""
+        try:
+            response = await self.openai_client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                max_tokens=1000,
+                temperature=0.7
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"OpenAI API error: {e}")
+            raise
+    
+    async def _generate_anthropic_response(self, system_prompt: str, user_prompt: str) -> str:
+        """Generate response using Anthropic's API."""
+        try:
+            response = await self.anthropic_client.messages.create(
+                model="claude-3-sonnet-20240229",
+                max_tokens=1000,
+                system=system_prompt,
+                messages=[
+                    {"role": "user", "content": user_prompt}
+                ]
+            )
+            return response.content[0].text
+        except Exception as e:
+            logger.error(f"Anthropic API error: {e}")
+            raise
+    
+    async def _generate_ollama_response(self, system_prompt: str, user_prompt: str) -> str:
+        """Generate response using local Ollama model."""
+        import aiohttp
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                payload = {
+                    "model": "llama3",
+                    "prompt": f"{system_prompt}\n\nUser: {user_prompt}\nAssistant:",
+                    "stream": False
+                }
+                
+                async with session.post(f"{self.ollama_host}/api/generate", json=payload) as response:
+                    result = await response.json()
+                    return result.get("response", "")
+        except Exception as e:
+            logger.error(f"Ollama API error: {e}")
+            raise
+
+    def _calculate_confidence_score(self, contexts: List[RAGContext]) -> float:
+        """
+        Calculate confidence score based on context relevance.
+        
+        This helps users understand how confident the system is in its answer
+        based on the quality and relevance of the retrieved context.
+        """
+        if not contexts:
+            return 0.0
+
+        # avg similarity score of all contexts
+        avg_similarity = sum(ctx.similarity_score for ctx in contexts) / len(contexts)
+
+        # bonus for having multiple relevant sources
+        source_bonus = min(len(contexts) / 3, 1.0) * 0.1
+
+        return min(avg_similarity + source_bonus, 1.0)
+
+    async def search_documents(self,
+                               query,
+                               filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """
+        Search documents and return formatted results.
+        
+        This provides a more traditional search experience while still leveraging
+        the semantic search capabilities of the RAG system.
+        """
+        contexts = await self.retrieve_relevant_context(query, filters)
+
+        # Group contexts by document and format results
+        document_results = {}
+        for context in contexts:
+            doc_id = context.metadata.get("document_id")
+            if doc_id not in document_results:
+                document_results[doc_id] = {
+                    "document_id": doc_id,
+                    "title": context.metadata.get("title", "Untitled"),
+                    "source_file": context.source_document,
+                    "subject": context.metadata.get("subject", "General"),
+                    "upload_date": context.metadata.get("upload_date"),
+                    "relevant_chunks": [],
+                    "max_similarity": 0.0
+                }
+            
+            document_results[doc_id]["relevant_chunks"].append({
+                "content": context.content[:200] + "..." if len(context.content) > 200 else context.content,
+                "similarity_score": context.similarity_score
+            })
+
+            # Track highest similarity score for ranking
+            document_results[doc_id]["max_similarity"] = max(
+                document_results[doc_id]["max_similarity"],
+                context.similarity_score
+            )
+
+        # Sort by relevance
+        sorted_results = sorted(
+            document_results.values(),
+            key=lambda x: x["max_similarity"],
+            reverse=True
+        )
+
+        return sorted_results
+
+
