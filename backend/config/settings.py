@@ -7,7 +7,8 @@ making it easy to manage different environments (dev, staging, production).
 
 import os
 from typing import List, Optional
-from pydantic import BaseSettings, Field
+from pydantic_settings import BaseSettings
+from pydantic import Field
 from functools import lru_cache
 
 class Settings(BaseSettings):
@@ -22,7 +23,7 @@ class Settings(BaseSettings):
     debug: bool = Field(default=False, env="DEBUG")
     
     # Database settings
-    database_url: str = Field(..., env="DATABASE_URL")
+    # database_url: str = Field(..., env="DATABASE_URL")
     database_echo: bool = Field(default=False, env="DATABASE_ECHO")
     
     # Vector database settings (ChromaDB)
@@ -34,10 +35,10 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = Field(default=None, env="OPENAI_API_KEY")
     anthropic_api_key: Optional[str] = Field(default=None, env="ANTHROPIC_API_KEY")
     ollama_host: str = Field(default="http://localhost:11434", env="OLLAMA_HOST")
-    llm_provider: str = Field(default="openai", env="LLM_PROVIDER")  # openai, anthropic, ollama
+    llm_provider: str = Field(default="ollama", env="LLM_PROVIDER")  # openai, anthropic, ollama
     
     # Authentication settings
-    secret_key: str = Field(..., env="SECRET_KEY")
+    # secret_key: str = Field(..., env="SECRET_KEY")
     algorithm: str = Field(default="HS256", env="ALGORITHM")
     access_token_expire_minutes: int = Field(default=30, env="ACCESS_TOKEN_EXPIRE_MINUTES")
     
