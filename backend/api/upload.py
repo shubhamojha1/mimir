@@ -3,6 +3,22 @@ from fastapi.responses import JSONResponse
 from typing import Dict
 import os
 from pathlib import Path
+from PyPDF2 import PdfReader # type: ignore
+from datetime import datetime
+import logging
+
+from ..services.rag_service import RAGService
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(),  # Logs to console
+        logging.FileHandler("app.log")  # Logs to a file
+    ]
+)
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/upload",
@@ -18,6 +34,27 @@ PDF_DIR = UPLOAD_DIR / "pdf"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 PDF_DIR.mkdir(parents=True, exist_ok=True)
 
+# initialize RAG service - chromaDB
+rag_service = RAGService()
+
+def extract_text_from_pdf(file_path: str) -> str:
+    """Extract text content from uploaded PDF"""
+    with open(file_path, 'rb') as file:
+        reader = PdfReader(file)
+        text = ""
+        for page in reader.pages:
+            text += page.extract_text() or ""
+    return text
+
+@router.get("/ping")
+async def check_health() -> JSONResponse:
+    return JSONResponse(
+        status_code=200,
+        content={
+            "message": "running!"
+        }
+    )
+
 @router.post("/pdf", response_model=Dict[str, str])
 async def upload_pdf(file: UploadFile = File(...)) -> JSONResponse:
     """
@@ -32,6 +69,8 @@ async def upload_pdf(file: UploadFile = File(...)) -> JSONResponse:
     Raises:
         HTTPException: If file is not a PDF or if upload fails
     """
+    print(f"Received file: {file}")
+    print(f"Content type: {type(file)}")
     try:
         # Validate file extension
         if not file.filename or not file.filename.lower().endswith('.pdf'):
@@ -44,18 +83,60 @@ async def upload_pdf(file: UploadFile = File(...)) -> JSONResponse:
         safe_filename = Path(file.filename).name  # Remove path traversal risk
         file_path = PDF_DIR / safe_filename
 
-        # Save file
-        async with open(file_path, "wb") as f:
-            content = await file.read()
-            await f.write(content)
+        print(f"Received file: {file.filename}")
+        print(f"Content type: {file.content_type}")
 
-        return JSONResponse(
-            content={
-                "filename": safe_filename,
-                "message": "PDF uploaded successfully"
-            },
-            status_code=200
+        # Save file
+        print("======================File reading beigns======================")
+        with open(file_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+        print("======================File reading ends======================")
+
+        print("======================Text extracting begins======================")
+        pdf_text = extract_text_from_pdf(file_path)
+        print("======================Text extracting ends======================")
+
+        if not pdf_text.strip():
+            return JSONResponse(
+                content={
+                    "filename": safe_filename,
+                    "message": "PDF uploaded but no text could be extracted"
+                },
+                status_code=200
+            )
+        
+        # creating metadata for the document
+        metadata = {
+            "source_file": safe_filename,
+            "title": safe_filename.replace('.pdf', ''),
+            "upload_date": datetime.now().isoformat(),
+            "file_path": str(file_path)
+        }
+        print("======================indexing begins======================")
+        success = await rag_service.add_document_to_index(
+            document_id = safe_filename,
+            content=pdf_text,
+            metadata=metadata
         )
+        print("======================indexing ends======================")
+
+        if success:
+            return JSONResponse(
+                content={
+                    "filename": safe_filename,
+                    "message": "PDF uploaded and indexed successfully"
+                },
+                status_code=200
+            )
+        else:
+            return JSONResponse(
+                content={
+                    "filename": safe_filename,
+                    "message": "PDF uploaded but indexing failed"
+                },
+                status_code=500
+            )
 
     except Exception as e:
         raise HTTPException(
