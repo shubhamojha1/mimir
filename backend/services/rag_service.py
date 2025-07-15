@@ -11,6 +11,7 @@ from chromadb.config import Settings as ChromaSettings
 from sentence_transformers import SentenceTransformer
 import tiktoken
 import os
+import time
 print(os.getcwd())
 
 from ..config.settings import get_settings
@@ -144,6 +145,7 @@ class RAGService:
             bool: True if successful, False otherwise
         """
         try:
+            start_time = datetime.now()
             chunks = self._create_chunks(content)
 
             embeddings = []
@@ -173,8 +175,9 @@ class RAGService:
                 metadatas = chunk_metadata,
                 ids = chunk_ids
             )
+            processing_time = (datetime.now() - start_time).total_seconds()
 
-            logger.info(f"Added document {document_id} with {len(chunks)} chunks to RAG index")
+            logger.info(f"Added document {document_id} with {len(chunks)} chunks to RAG index. Took {processing_time} seconds.")
             return True
         except Exception as e:
             logger.error(f"Failed to add document {document_id} to RAG index: {e}")
