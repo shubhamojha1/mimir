@@ -64,7 +64,7 @@ class Settings(BaseSettings):
     # RAG settings - These control how retrieval-augmented generation works
     rag_chunk_size: int = Field(default=1000, env="RAG_CHUNK_SIZE")  # Characters per chunk
     rag_chunk_overlap: int = Field(default=200, env="RAG_CHUNK_OVERLAP")  # Overlap between chunks
-    rag_similarity_threshold: float = Field(default=0.7, env="RAG_SIMILARITY_THRESHOLD")
+    rag_similarity_threshold: float = Field(default=0.01, env="RAG_SIMILARITY_THRESHOLD")
     rag_max_results: int = Field(default=5, env="RAG_MAX_RESULTS")  # Max chunks to retrieve
     
     # Redis settings for caching

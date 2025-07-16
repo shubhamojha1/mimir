@@ -92,15 +92,15 @@ class RAGService:
                 path="./data/chroma_db",
                 settings=ChromaSettings(anonymized_telemetry=False)
             )
-            
+
             # Get or create collection for documents
             self.collection = self.chroma_client.get_or_create_collection(
                 name='pdfs', #self.settings.vector_collection_name,
                 metadata={"description": "Mimir document embeddings"}
             )
-            
+
             logger.info(f"Vector database initialized with {self.collection.count()} documents")
-            
+
         except Exception as e:
             logger.error(f"Failed to initialize vector database: {e}")
             raise
@@ -115,19 +115,19 @@ class RAGService:
         if self.settings.llm_provider == "openai" and self.settings.openai_api_key:
             self.openai_client = openai.OpenAI(api_key=self.settings.openai_api_key)
             logger.info("OpenAI client initialized")
-            
+
         elif self.settings.llm_provider == "anthropic" and self.settings.anthropic_api_key:
             self.anthropic_client = Anthropic(api_key=self.settings.anthropic_api_key)
             logger.info("Anthropic client initialized")
-            
+
         elif self.settings.llm_provider == "ollama":
             # For local Ollama models, we'll use HTTP requests
             self.ollama_host = self.settings.ollama_host
             logger.info("Ollama client configured")
-            
+
         else:
             raise ValueError("No valid LLM provider configured")
-        
+
     async def add_document_to_index(self, document_id, content, metadata) -> bool:
         """
         Add a document to the RAG index for future retrieval.
@@ -155,7 +155,7 @@ class RAGService:
             for i, chunk in enumerate(chunks):
                 chunk_id = f"{document_id}_chunk_{i}"
                 chunk_embedding = self.embedding_model.encode(chunk).tolist()
-                
+
                 # Combine document metadata with chunk-specific information
                 chunk_meta = {
                     **metadata,
@@ -164,11 +164,11 @@ class RAGService:
                     "document_id": document_id,
                     "content_preview": chunk[:100] + "..." if len(chunk) > 100 else chunk
                 }
-                
+
                 embeddings.append(chunk_embedding)
                 chunk_ids.append(chunk_id)
                 chunk_metadata.append(chunk_meta)
-            
+
             self.collection.add(
                 embeddings = embeddings,
                 documents = chunks,
@@ -182,7 +182,7 @@ class RAGService:
         except Exception as e:
             logger.error(f"Failed to add document {document_id} to RAG index: {e}")
             return False
-        
+
     def _create_chunks(self, content: str) -> List[str]:
         """
         Split content into overlapping chunks for better retrieval.
@@ -216,7 +216,7 @@ class RAGService:
                 break
 
         return [chunk for chunk in chunks if chunk.strip()]
-    
+
     async def retrieve_relevant_context(self, 
                                         query: str, 
                                         filters: Optional[Dict[ str, Any]] = None,
@@ -254,7 +254,9 @@ class RAGService:
 
             # query ChromaDB for similar chunks
             results = self.collection.query(**query_params)
-
+            print("*"*20)
+            print("Raw ChromaDB results:", results)
+            print("*"*20)
             # convert results to RAGContext objects
             contexts = []
             for i in range(len(results["documents"][0])):
@@ -268,16 +270,18 @@ class RAGService:
                 )
 
                 # only include results above similarity threshold
+                print("*"*20)
+                print("SIMILARITY SCORE: ", context.similarity_score)
                 if context.similarity_score >= self.settings.rag_similarity_threshold:
                     contexts.append(context)
 
             logger.info(f"Retrieved {len(contexts)} relevant contexts for query: {query[:50]}...")
             return contexts
-        
+
         except Exception as e:
             logger.error(f"Failed to retrieve relevant context: {e}")
             return []
-        
+
     async def generate_rag_response(self,
                                     query: str,
                                     contexts: List[RAGContext],
@@ -334,7 +338,7 @@ class RAGService:
                 confidence_score=0.0,
                 processing_time=(datetime.now() - start_time).total_seconds()                
             )
-    
+
     def _build_context_text(self, contexts: List[RAGContext]) -> str:
         """
         Combine retrieved contexts into a single text block for the LLM.
@@ -344,14 +348,14 @@ class RAGService:
         """
         if not contexts:
             return "No relevant context found in your documents."
-        
+
         context_parts = []
         for i, context in enumerate(contexts, 1):
             context_part = f"[Source {i}: {context.source_document}]\n{context.content}\n"
             context_parts.append(context_part)
 
         return "\n".join(context_parts)
-    
+
     async def _generate_llm_response(self, system_prompt, user_prompt) -> str:
         """
         Generate response using the configured LLM provider.
@@ -364,10 +368,11 @@ class RAGService:
         elif self.settings.llm_provider == "anthropic":
             return await self._generate_anthropic_response(system_prompt, user_prompt)
         elif self.settings.llm_provider == "ollama":
+            print("running ollama!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
             return await self._generate_ollama_response(system_prompt, user_prompt)
         else:
             raise ValueError(f"Unsupported LLM provider: {self.settings.llm_provider}")
-        
+
     async def _generate_openai_response(self, system_prompt: str, user_prompt: str) -> str:
         """Generate response using OpenAI's API."""
         try:
@@ -384,7 +389,7 @@ class RAGService:
         except Exception as e:
             logger.error(f"OpenAI API error: {e}")
             raise
-    
+
     async def _generate_anthropic_response(self, system_prompt: str, user_prompt: str) -> str:
         """Generate response using Anthropic's API."""
         try:
@@ -400,25 +405,29 @@ class RAGService:
         except Exception as e:
             logger.error(f"Anthropic API error: {e}")
             raise
-    
+
     async def _generate_ollama_response(self, system_prompt: str, user_prompt: str) -> str:
         """Generate response using local Ollama model."""
         import aiohttp
-        
+
+        url = f"{self.ollama_host}/api/generate"
+        payload = {
+            "model": "llama3.2",
+            "prompt": f"{system_prompt}\n\nUser: {user_prompt}\nAssistant:",
+            "stream": False
+        }
+
         try:
             async with aiohttp.ClientSession() as session:
-                payload = {
-                    "model": "llama3",
-                    "prompt": f"{system_prompt}\n\nUser: {user_prompt}\nAssistant:",
-                    "stream": False
-                }
-                
-                async with session.post(f"{self.ollama_host}/api/generate", json=payload) as response:
-                    result = await response.json()
-                    return result.get("response", "")
+                async with session.post(url, json=payload) as resp:
+                    resp.raise_for_status()
+                    data = await resp.json()
+                    # The generated text is returned under the "response" key
+                    return data.get("response", "")
         except Exception as e:
             logger.error(f"Ollama API error: {e}")
             raise
+
 
     def _calculate_confidence_score(self, contexts: List[RAGContext]) -> float:
         """
@@ -463,7 +472,7 @@ class RAGService:
                     "relevant_chunks": [],
                     "max_similarity": 0.0
                 }
-            
+
             document_results[doc_id]["relevant_chunks"].append({
                 "content": context.content[:200] + "..." if len(context.content) > 200 else context.content,
                 "similarity_score": context.similarity_score
@@ -483,5 +492,3 @@ class RAGService:
         )
 
         return sorted_results
-
-
