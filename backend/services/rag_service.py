@@ -15,7 +15,7 @@ import time
 print(os.getcwd())
 
 from ..config.settings import get_settings
-# from backend.utils.prompts import RAGPrompts
+from backend.utils.prompts import RAGPrompts
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ class RAGService:
     def __init__(self):
         self.settings = get_settings()
         self.embedding_model = SentenceTransformer('all-mpnet-base-v2') # best free alternative to openai embeddings
-        # self.prompts = RAGPrompts()
+        self.prompts = RAGPrompts()
 
         self._init_vector_db() # initialize chromadb
         self._init_llm_clients() # initialize llm clients based on configurations
@@ -255,7 +255,7 @@ class RAGService:
             # query ChromaDB for similar chunks
             results = self.collection.query(**query_params)
 
-            # convert resilts to RAGContext objects
+            # convert results to RAGContext objects
             contexts = []
             for i in range(len(results["documents"][0])):
                 context = RAGContext(
@@ -271,8 +271,9 @@ class RAGService:
                 if context.similarity_score >= self.settings.rag_similarity_threshold:
                     contexts.append(context)
 
-            logger.info(f"Retrieved {len(contexts)} relevatn contexts for query: {query[:50]}...")
+            logger.info(f"Retrieved {len(contexts)} relevant contexts for query: {query[:50]}...")
             return contexts
+        
         except Exception as e:
             logger.error(f"Failed to retrieve relevant context: {e}")
             return []

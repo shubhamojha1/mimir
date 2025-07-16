@@ -1,14 +1,31 @@
 # main.py
 from fastapi import FastAPI, Request, HTTPException, Body
+from fastapi.middleware.cors import CORSMiddleware
+
 import httpx
 from pydantic import BaseModel
 import requests
 from typing import Dict, List
 
-app = FastAPI()
-
 # from api.intent import router as intent_router
-from api.upload import router as upload_router
+from backend.api.upload import router as upload_router
+
+app = FastAPI(
+    title = "Mimir autonomous research and study assistant",
+    description = "it does something",
+    version="0.0.1"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False, #TODO: change to True
+    allow_methods=["*"],
+    allow_headers=["*"]
+)
+
+# Include the upload router
+app.include_router(upload_router, tags=["upload"])
 
 @app.get("/")
 async def read_root():
@@ -17,6 +34,7 @@ async def read_root():
 class MessageRequest(BaseModel):
     message: str
     model: str = "llama3.2:latest" 
+    # model: str = "deepseek-r1:7b"
 
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
 
@@ -41,9 +59,6 @@ def ask_ollama(request: MessageRequest):
         return {"response": result.get("response")}
     except requests.RequestException as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-# Include the upload router
-app.include_router(upload_router)
 
 # In-memory store for chat history (for demo purposes)
 chat_histories: Dict[str, List[Dict[str, str]]] = {}

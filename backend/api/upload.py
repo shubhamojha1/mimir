@@ -1,6 +1,6 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Query
 from fastapi.responses import JSONResponse
-from typing import Dict
+from typing import Dict, Optional, Any
 import os
 from pathlib import Path
 from PyPDF2 import PdfReader # type: ignore
@@ -142,4 +142,58 @@ async def upload_pdf(file: UploadFile = File(...)) -> JSONResponse:
         raise HTTPException(
             status_code=500,
             detail=f"An error occurred while uploading the file: {str(e)}"
+        )
+
+from pydantic import BaseModel
+from typing import Dict, Any, Optional
+
+class SearchRequest(BaseModel):
+    query: str
+    filters: Optional[Dict[str, Any]] = None
+
+@router.post("/search")
+async def semantic_search(
+    # query: str = Query(..., description="The search query"),
+    # filters: Optional[Dict[str, Any]] = None,
+    request: SearchRequest
+) -> Dict[str, Any]:
+    """
+    Perform semantic search on uploaded documents and return RAG-powered response.
+    """
+    try:
+        # retrieve relevant contexts
+        logger.info("=========Retrieve relevant context start=========")
+        contexts = await rag_service.retrieve_relevant_context(
+            query=request.query,
+            filters=request.filters,
+            max_results=3 # TODO: Need to adjust accorindly.
+        )
+        logger.info("=========Retrieve relevant context end=========")
+
+        logger.info("=========Generate RAG response start=========")
+        # generate RAG Response using contexts
+        response = await rag_service.generate_rag_response(
+            query=request.query,
+            contexts=contexts
+        )
+        logger.info("=========Generate RAG response end=========")
+
+        return {
+            "answer": response.answer,
+            "sources": [
+                {
+                    "content": source.content,
+                    "document": source.source_document,
+                    "similarity": source.similarity_score,
+                    "metadata": source.metadata
+                }
+                for source in response.sources
+            ],
+            "confidence_score": response.confidence_score,
+            "processing_time": response.processing_time
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error performing semantic search: {str(e)}"
         )
