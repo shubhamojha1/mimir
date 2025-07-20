@@ -151,7 +151,7 @@ class SearchRequest(BaseModel):
     query: str
     filters: Optional[Dict[str, Any]] = None
 
-@router.post("/search")
+@router.post("/rag")
 async def semantic_search(
     # query: str = Query(..., description="The search query"),
     # filters: Optional[Dict[str, Any]] = None,
@@ -166,15 +166,18 @@ async def semantic_search(
         contexts = await rag_service.retrieve_relevant_context(
             query=request.query,
             filters=request.filters,
-            max_results=3 # TODO: Need to adjust accorindly.
+            max_results=3 # TODO: Need to adjust accordingly.
         )
+        logger.info(f"Retrieved {len(contexts)} contexts")
         logger.info("=========Retrieve relevant context end=========")
 
         logger.info("=========Generate RAG response start=========")
         # generate RAG Response using contexts
         response = await rag_service.generate_rag_response(
             query=request.query,
-            contexts=contexts
+            contexts=contexts,
+            agent_type="software development" # AGENT TYPE MAKES ALL THE DIFFERENCE BETWEEN A GOOD AND BAD RESPONSE.
+                                              # TODO: Need to address this so that agent type is inferred dynamically.
         )
         logger.info("=========Generate RAG response end=========")
 
