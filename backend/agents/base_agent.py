@@ -3,11 +3,16 @@ import logging
 from enum import Enum
 from typing import Any, List, Dict, Optional, TypedDict, Annotated
 from dataclasses import dataclass, asdict
+from datetime import datetime
 import operator
 
 from ..services.rag_service import RAGService
 from ..config.settings import get_settings
 from ..utils.prompts import AgentPrompts
+
+from langgraph.graph import StateGraph, END
+from langgraph.prebuilt import ToolExecutor
+from langgraph.checkpoint.memory import MemorySaver
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +114,70 @@ class SupervisorAgent:
         self.intent_classifier = IntentClassifier()
         self.confidence_threshold = 0.6
 
-        
+        # Build the langgraph
+        self.graph = self._build_graph()
+
+    def _build_graph(self) -> StateGraph:
+        """Build the langgraph state machine"""
+        workflow = StateGraph(AgentState)
+
+        # Add nodes
+        workflow.add_node("classify_intent", self.classify_intent)
+        workflow.add_node("llm_fallback", self.llm_fallback_classification)
+        workflow.add_node("route_agents", self.route_to_agents)
+        workflow.add_node("execute_agents", self.execute_agents)
+        workflow.add_node("handle_clarification", self.handle_clarification)
+        workflow.add_node("validate_output", self.validate_output)
+        workflow.add_node("consolidate_response", self.consolidate_response)
+
+        # Add edges with conditional routing
+        workflow.set_entry_point("classify_intent")
+
+        workflow.add_conditional_edges(
+            "classify_intent",
+            self.should_use_llm_fallback,
+            {
+                "use_llm": "llm_fallback",
+                "proceed": "route_agents"
+            }
+        )
+
+        workflow.add_edge("llm_fallback", "route_agents")
+        workflow.add_edge("route_agents", "execute_agents")
+
+        workflow.add_conditional_edges(
+            "execute_agents",
+            self.needs_clarification,
+            {
+                "clarify": "handle_clarification",
+                "validate": "validate_output"
+            }
+        )
+
+        workflow.add_edge("handle_clarification", "execute_agents")
+        workflow.add_edge("validate_output", "consolidate_response")
+        workflow.add_edge("consolidate_response", END)
+
+        # memory for state persistence
+        memory = MemorySaver()
+        return workflow.compile(checkpointer=memory)
+
+    async def classify_intent(self, state: AgentState) -> AgentState:
+        """Node: Classify user intent"""
+        user_query = state["user_query"]
+        intent, confidence = self.intent_classifier.classify(user_query)
+
+        state["intent"] = intent.value
+        state["intent_confidence"] = confidence
+        state["processing_steps"].append({
+            "step": "intent_classification",
+            "intent": intent.value,
+            "confidence": confidence,
+            "timestamp": datetime.now().isoformat()
+        })
+
+        logger.info(f"Classified intent: {intent.value} (confidence: {confidence:.2f})")
+        return state
 # class BaseAgent(ABC):
 #     """
 #     Defines the common interface and shared functionality that all agents inherit.
