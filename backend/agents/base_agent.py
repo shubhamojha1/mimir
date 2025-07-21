@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 import logging
+from enum import Enum
 from typing import Any, List, Dict, Optional, TypedDict, Annotated
+from dataclasses import dataclass, asdict
 import operator
 
 from ..services.rag_service import RAGService
@@ -24,6 +26,90 @@ class AgentState(TypedDict):
     # Reducer for agent_responses to accumulate results
     agent_responses: Annotated[Dict, operator.add]
 
+class IntentType(Enum):
+    """Supported Intent Types"""
+    QUESTION_ANSWER = "question_answer"
+    SUMMARIZE = "summarize" 
+    ANALYZE = "analyze"
+    COMPARE = "compare"
+    STUDY_GUIDE = "study_guide"
+    PRACTICE_PROBLEMS = "practice_problems"
+    MATH_SOLVE = "math_solve"
+    CODE_REVIEW = "code_review"
+    RESEARCH = "research"
+    CLARIFICATION = "clarification"
+    # TODO: Add more intents (podcast generation / etc.)
+
+@dataclass 
+class AgentConfig:
+    """Configuration for individual agents"""
+    agent_type: str
+    supported_intents: List[IntentType]
+    parallal_capable: bool = True
+    dependencies: List[str] = None
+    confidence_threshold: float = 0.7
+
+class IntentClassifier:
+    """Intent classification with confidence scoring"""
+    # TODO: will add intent classifier with finetuned Setfit model
+    def __init__(self):
+        # Intent patterns and keywords
+        self.intent_patterns = {
+            IntentType.QUESTION_ANSWER: [
+                "what", "how", "why", "when", "where", "explain", "tell me"
+            ],
+            IntentType.SUMMARIZE: [
+                "summarize", "summary", "key points", "main ideas", "overview"
+            ],
+            IntentType.ANALYZE: [
+                "analyze", "analysis", "examine", "evaluate", "assess", "critique"
+            ],
+            IntentType.COMPARE: [
+                "compare", "contrast", "difference", "similarity", "versus", "vs"
+            ],
+            IntentType.STUDY_GUIDE: [
+                "study guide", "notes", "prepare for", "exam", "test", "review"
+            ],
+            IntentType.PRACTICE_PROBLEMS: [
+                "practice", "problems", "exercises", "quiz", "questions"
+            ],
+            IntentType.MATH_SOLVE: [
+                "solve", "calculate", "equation", "formula", "derivative", "integral"
+            ],
+            IntentType.CODE_REVIEW: [
+                "code", "debug", "review", "programming", "function", "algorithm"
+            ]
+        }
+    
+    def classify(self, query: str) -> tuple[IntentType, float]:
+        """Classify intent with confidence score"""
+        query_lower = query.lower()
+        scores = {}
+        
+        for intent, keywords in self.intent_patterns.items():
+            score = sum(1 for keyword in keywords if keyword in query_lower)
+            if score > 0:
+                scores[intent] = score / len(keywords)
+        
+        if not scores:
+            return IntentType.QUESTION_ANSWER, 0.3
+        
+        best_intent = max(scores, key=scores.get)
+        confidence = min(scores[best_intent] * 2, 1.0)  # Scale confidence
+        
+        return best_intent, confidence
+
+class SupervisorAgent:
+    """
+    Supervisor agent that orchestrates the entire workflow
+    """
+    def __init__(self, rag_service, available_agents: Dict[str, AgentConfig]):
+        self.rag_service = rag_service
+        self.available_agents = available_agents
+        self.intent_classifier = IntentClassifier()
+        self.confidence_threshold = 0.6
+
+        
 # class BaseAgent(ABC):
 #     """
 #     Defines the common interface and shared functionality that all agents inherit.

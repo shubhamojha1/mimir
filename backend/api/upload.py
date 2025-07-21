@@ -146,7 +146,7 @@ async def upload_pdf(file: UploadFile = File(...)) -> JSONResponse:
 
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
-
+# TODO: Separate endpoints based on logic
 class SearchRequest(BaseModel):
     query: str
     filters: Optional[Dict[str, Any]] = None
