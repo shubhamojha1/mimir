@@ -1,0 +1,12 @@
+Allow user to create collections of their own.
+so that each query is isolated to a collection.
+
+focus on building supervisor agent along with intent classification.
+next focus on 1-2 specialized agents
+next general agent
+
+need to look for ways to scrape/search online for more accurate results
+
+also
+supervised fine tuning, reinforcement fine tuning, direct preference optimization
+rlhf?
