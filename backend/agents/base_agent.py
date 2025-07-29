@@ -256,6 +256,30 @@ class SupervisorAgent:
         })
 
         return state
+    
+    async def handle_clarification(self, state: AgentState) -> AgentState:
+        """Node: Handle clarification requests from agents"""
+        return state
+    
+    async def validate_output(self, state: AgentState) -> AgentState:
+        """Node: Validate the combined agent outputs against user intent"""
+        return state
+    
+    async def consolidate_response(self, state: AgentState) -> AgentState:
+        """Node: Consolidate all agent responses into final response"""
+        return state
+    
+    # Conditional edge functions
+    def should_use_llm_feedback(self, state: AgentState) -> AgentState:
+        """Node: Determine if we need LLM fallback for intent classification"""
+        return None
+    
+    def needs_clarification(self, state: AgentState) -> str:
+        """Check if any agents requested clarification"""
+        return None
+    
+    # helper functions
+    
 # class BaseAgent(ABC):
 #     """
 #     Defines the common interface and shared functionality that all agents inherit.
