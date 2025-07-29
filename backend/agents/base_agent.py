@@ -279,6 +279,134 @@ class SupervisorAgent:
         return None
     
     # helper functions
+    def _create_execution_plan(self, agents: List[str], intent: IntentType) -> Dict[str, Any]:
+        """Create execution plan for agents"""
+        # TODO: simple logic for now.. need to implement better one
+        if len(agents) <= 2:
+            return {"type": "parallel"}
+        else:
+            return {
+                "type": "sequential",
+                "sequence": agents # TODO: could (how?) implement dependency based ordering
+            }
+        
+    async def _retrieve_context_for_agents(self, state: AgentState) -> List[Dict[str, Any]]:
+        """Retrieve relevant context for agent execution"""
+        # TODO: need to decide what context to retrieve
+        # could involve communicating with other agents
+        # not just rag retrieval
+        try:
+            contexts = await self.rag_service.retrieve_relevant_context(
+                query=state["user_query"],
+                filters={},
+                max_results=5
+            )
+            return [asdict(ctx) for ctx in contexts]
+        except Exception as e:
+            logger.error(f"Error retrieving context")
+
+    async def _execute_agents_in_parallel(self,
+                                          agents: List[str],
+                                          state: AgentState,
+                                          contexts: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Execute agents in parallel"""
+        # Implementation would use asyncio.gather or similar
+        responses = {}
+        for agent in agents:
+            try:
+                response = await self._execute_single_agent(agent, state, contexts)
+                responses[agent] = response
+            except Exception as e:
+                logger.error(f"Error executing agent {agent}: {e}")
+                responses[agent] = f"Error: {str(e)}"
+        
+        return responses
+    
+    async def _execute_agents_sequential(self, 
+                                       agents: List[str], 
+                                       state: AgentState, 
+                                       contexts: List[Dict[str, Any]],
+                                       sequence: List[str]) -> Dict[str, str]:
+        """Execute agents sequentially"""
+        responses = {}
+        accumulated_context = contexts.copy()
+        
+        for agent in sequence:
+            try:
+                response = await self._execute_single_agent(agent, state, accumulated_context)
+                responses[agent] = response
+                
+                # Add previous responses to context for next agent
+                accumulated_context.append({
+                    "source": f"agent_{agent}",
+                    "content": response,
+                    "type": "agent_response"
+                })
+                
+            except Exception as e:
+                logger.error(f"Error executing agent {agent}: {e}")
+                responses[agent] = f"Error: {str(e)}"
+        
+        return responses
+    
+    async def _execute_single_agent(self, 
+                                   agent_name: str, 
+                                   state: AgentState, 
+                                   contexts: List[Dict[str, Any]]) -> str:
+        """Execute a single agent"""
+        # This would interface with your existing agent implementations
+        # For now, using RAG service as placeholder
+        
+        agent_prompt = f"""
+        You are the {agent_name} specialized for handling {state['intent']} tasks.
+        
+        User Query: {state['user_query']}
+        Intent: {state['intent']}
+        
+        Available Context:
+        {contexts}
+        
+        Please provide your specialized response to this query.
+        """
+        
+        try:
+            response = await self.rag_service._generate_llm_response(
+                f"You are {agent_name}, a specialized agent.",
+                agent_prompt
+            )
+            return response
+        except Exception as e:
+            # Check if this agent needs clarification
+            if "unclear" in str(e).lower() or "ambiguous" in str(e).lower():
+                state["clarifications_needed"].append(f"{agent_name} needs clarification: {str(e)}")
+            raise e
+    
+    # Main execution method
+    async def process_query(self, user_query: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Process user query through the LangGraph workflow"""
+        initial_state = AgentState(
+            user_query=user_query,
+            intent=None,
+            intent_confidence=0.0,
+            agent_responses={},
+            context_data=[],
+            clarifications_needed=[],
+            processing_steps=[],
+            final_response="",
+            metadata=context or {}
+        )
+        
+        # Execute the graph
+        config = {"thread_id": f"user_session_{datetime.now().timestamp()}"}
+        final_state = await self.graph.ainvoke(initial_state, config)
+        
+        return {
+            "response": final_state["final_response"],
+            "intent": final_state["intent"],
+            "confidence": final_state["intent_confidence"],
+            "processing_steps": final_state["processing_steps"],
+            "metadata": final_state["metadata"]
+        }
     
 # class BaseAgent(ABC):
 #     """
