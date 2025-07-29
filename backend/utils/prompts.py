@@ -3,7 +3,7 @@ from typing import Optional
 
 class RAGPrompts:
     """
-    Manages prompt templates for the entire project.
+    Manages prompt templates for the RAG system.
     """
     def get_rag_system_prompt(self, agent_type: Optional[str] = None) -> str:
         """
@@ -68,3 +68,100 @@ class RAGPrompts:
                 4. Keep your response clear and concise
 
                 Answer:"""
+    
+class SupervisorPrompts:
+    """Manages prompt templates for all the agents"""
+    def chain_of_thought_prompt(self, query) -> str:
+        cot_prompt = f"""
+                I need to carefully analyze this user query to understand their intent. Let me think through this step by step.
+
+                Query: "{query}"
+
+                Let me break this down:
+
+                Step 1: What are the key words and phrases in this query?
+                - Identify the main action words (verbs)
+                - Identify the subject matter (nouns)
+                - Look for intent indicators (question words, request patterns)
+
+                Step 2: What is the user trying to accomplish?
+                - Are they seeking information? (question_answer)
+                - Do they want content condensed? (summarize)
+                - Do they need detailed examination? (analyze)
+                - Are they comparing things? (compare)
+                - Do they need study materials? (study_guide)
+                - Do they want practice exercises? (practice_problems)
+                - Are they solving math problems? (math_solve)
+                - Do they need code help? (code_review)
+                - Are they doing research? (research)
+                - Do they need clarification? (clarification)
+
+                Step 3: What evidence supports each possible intent?
+                - List specific words/phrases that indicate each intent
+                - Consider the overall context and tone
+
+                Step 4: What intent best matches the evidence?
+                - Compare the strength of evidence for each intent
+                - Consider which intent would best serve the user's needs
+
+                Step 5: How confident am I in this classification?
+                - Strong evidence and clear intent = high confidence (0.8-1.0)
+                - Some evidence but could be multiple intents = medium confidence (0.5-0.7)
+                - Weak evidence or very ambiguous = low confidence (0.3-0.5)
+
+                Now let me work through these steps:
+            
+            Step 1 - Key words and phrases:
+            [Analyze the query here]
+            
+            Step 2 - User's goal:
+            [Determine what user wants to accomplish]
+            
+            Step 3 - Evidence for each intent:
+            [List evidence for different intents]
+            
+            Step 4 - Best matching intent:
+            [Choose the best intent with reasoning]
+            
+            Step 5 - Confidence assessment:
+            [Assess confidence with reasoning]
+            
+            Final answer: [intent_type],[confidence_score]        
+        """
+        return cot_prompt
+    
+    def clarification_prompt(self, query, clarifications) -> str:
+        prompt = f"""
+        The following clarifications are needed to better answer the user's question:
+        
+        Original Query: {query}
+        Clarifications Needed: {clarifications}
+        
+        Please provide reasonable assumptions or default interpretations for these clarifications
+        so we can proceed with generating a response.
+        """
+        return prompt
+
+    def consolidation_prompt(self, query, intent) -> str:
+        prompt = f"""
+        Consolidate the following agent responses into a single, coherent response 
+        that addresses the user's original query.
+        
+        Original Query: {query}
+        Intent: {intent}
+        
+        Agent Responses:
+        """
+        return prompt
+    
+    def additional_consolidation_prompt() -> str:
+        prompt = """
+                
+                Please create a unified response that:
+                1. Directly addresses the user's question
+                2. Integrates insights from all agents
+                3. Is well-structured and coherent
+                4. Cites sources appropriately
+                5. Provides actionable information where relevant
+                """
+        return prompt

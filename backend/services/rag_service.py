@@ -6,8 +6,8 @@ from datetime import datetime
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
-# import openai
-# from anthropic import Anthropic
+import openai
+from anthropic import Anthropic
 from sentence_transformers import SentenceTransformer
 import tiktoken
 import os
