@@ -8,7 +8,7 @@ import operator
 
 from ..services.rag_service import RAGService
 from ..config.settings import get_settings
-from ..utils.prompts import AgentPrompts
+from ..utils.prompts import SupervisorPrompts
 
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolExecutor
@@ -184,7 +184,7 @@ class SupervisorAgent:
         user_query = state["user_query"]
         
         # using chain of thought prompting
-        cot_prompt = AgentPrompts.supervisor_chain_of_thought_prompt(user_query)
+        cot_prompt = SupervisorPrompts.chain_of_thought_prompt(user_query)
 
         return Any
     
@@ -262,15 +262,8 @@ class SupervisorAgent:
         clarifications = state["clarifications_needed"]
         
         # Generate clarification response using LLM
-        clarification_prompt = f"""
-        The following clarifications are needed to better answer the user's question:
-        
-        Original Query: {state['user_query']}
-        Clarifications Needed: {clarifications}
-        
-        Please provide reasonable assumptions or default interpretations for these clarifications
-        so we can proceed with generating a response.
-        """
+        clarification_prompt = SupervisorPrompts.clarification_prompt(
+                                        state['user_query'], clarifications)
         
         try:
             clarification_response = await self.rag_service._generate_llm_response(
@@ -323,28 +316,12 @@ class SupervisorAgent:
         intent = state["intent"]
         
         # Create consolidation prompt
-        consolidation_prompt = f"""
-        Consolidate the following agent responses into a single, coherent response 
-        that addresses the user's original query.
-        
-        Original Query: {state['user_query']}
-        Intent: {intent}
-        
-        Agent Responses:
-        """
+        consolidation_prompt = SupervisorPrompts.consolidation_prompt(state['user_query'], intent)
         
         for agent_name, response in agent_responses.items():
             consolidation_prompt += f"\n{agent_name}: {response}\n"
         
-        consolidation_prompt += """
-        
-        Please create a unified response that:
-        1. Directly addresses the user's question
-        2. Integrates insights from all agents
-        3. Is well-structured and coherent
-        4. Cites sources appropriately
-        5. Provides actionable information where relevant
-        """
+        consolidation_prompt += SupervisorPrompts.additonal_consoludation_prompt()
         
         try:
             final_response = await self.rag_service._generate_llm_response(
@@ -514,7 +491,7 @@ class SupervisorAgent:
 #         self.agent_type = agent_type
 #         self.rag_service = rag_service
 #         self.settings = get_settings()
-#         self.prompts = AgentPrompts()
+#         self.prompts = SupervisorPrompts()
         
 #         # Agent-specific configuration
 #         self.max_context_length = 4000  # Maximum context to include in prompts
