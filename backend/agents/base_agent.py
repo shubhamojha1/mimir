@@ -259,24 +259,113 @@ class SupervisorAgent:
     
     async def handle_clarification(self, state: AgentState) -> AgentState:
         """Node: Handle clarification requests from agents"""
+        clarifications = state["clarifications_needed"]
+        
+        # Generate clarification response using LLM
+        clarification_prompt = f"""
+        The following clarifications are needed to better answer the user's question:
+        
+        Original Query: {state['user_query']}
+        Clarifications Needed: {clarifications}
+        
+        Please provide reasonable assumptions or default interpretations for these clarifications
+        so we can proceed with generating a response.
+        """
+        
+        try:
+            clarification_response = await self.rag_service._generate_llm_response(
+                "You help resolve ambiguities in user queries.",
+                clarification_prompt
+            )
+            
+            # Store clarification for use in next agent execution
+            state["metadata"]["clarifications_resolved"] = clarification_response
+            state["clarifications_needed"] = []  # Clear clarifications
+            
+            state["processing_steps"].append({
+                "step": "clarification_handling",
+                "clarifications": clarifications,
+                "resolution": clarification_response[:200] + "...",
+                "timestamp": datetime.now().isoformat()
+            })
+            
+        except Exception as e:
+            logger.error(f"Error handling clarifications: {e}")
+            state["clarifications_needed"] = []  # Clear to prevent loop
+        
         return state
     
     async def validate_output(self, state: AgentState) -> AgentState:
         """Node: Validate the combined agent outputs against user intent"""
+        intent = state["intent"]
+        agent_responses = state["agent_responses"]
+        
+        # Basic validation checks
+        validation_results = {
+            "has_responses": len(agent_responses) > 0,
+            "intent_addressed": True,  # More sophisticated check would go here
+            "quality_threshold_met": True,  # Quality assessment would go here
+            "completeness_check": True  # Completeness assessment would go here
+        }
+        
+        state["metadata"]["validation_results"] = validation_results
+        state["processing_steps"].append({
+            "step": "output_validation",
+            "validation_results": validation_results,
+            "timestamp": datetime.now().isoformat()
+        })
+        
         return state
     
     async def consolidate_response(self, state: AgentState) -> AgentState:
         """Node: Consolidate all agent responses into final response"""
+        agent_responses = state["agent_responses"]
+        intent = state["intent"]
+        
+        # Create consolidation prompt
+        consolidation_prompt = f"""
+        Consolidate the following agent responses into a single, coherent response 
+        that addresses the user's original query.
+        
+        Original Query: {state['user_query']}
+        Intent: {intent}
+        
+        Agent Responses:
+        """
+        
+        for agent_name, response in agent_responses.items():
+            consolidation_prompt += f"\n{agent_name}: {response}\n"
+        
+        consolidation_prompt += """
+        
+        Please create a unified response that:
+        1. Directly addresses the user's question
+        2. Integrates insights from all agents
+        3. Is well-structured and coherent
+        4. Cites sources appropriately
+        5. Provides actionable information where relevant
+        """
+        
+        try:
+            final_response = await self.rag_service._generate_llm_response(
+                "You are expert at consolidating multiple perspectives into coherent responses.",
+                consolidation_prompt
+            )
+            
+            state["final_response"] = final_response
+            state["processing_steps"].append({
+                "step": "response_consolidation",
+                "agents_consolidated": list(agent_responses.keys()),
+                "timestamp": datetime.now().isoformat()
+            })
+            
+        except Exception as e:
+            logger.error(f"Error consolidating responses: {e}")
+            # Fallback: return primary agent response
+            primary_response = next(iter(agent_responses.values()))
+            state["final_response"] = primary_response
+        
         return state
-    
-    # Conditional edge functions
-    def should_use_llm_feedback(self, state: AgentState) -> AgentState:
-        """Node: Determine if we need LLM fallback for intent classification"""
-        return None
-    
-    def needs_clarification(self, state: AgentState) -> str:
-        """Check if any agents requested clarification"""
-        return None
     
     # helper functions
     def _create_execution_plan(self, agents: List[str], intent: IntentType) -> Dict[str, Any]:
