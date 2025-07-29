@@ -225,7 +225,37 @@ class SupervisorAgent:
         })
 
         return state
+    
+    async def execute_agents(self, state: AgentState) -> AgentState:
+        """Node: Execute the required agentrs according to the plan"""
+        agents = state["metadata"]["required_agents"]
+        execution_plan = state["metadata"]["execution_plan"]
 
+        # Retrieve context for agents
+        contexts = await self._retrieve_context_for_agents()
+        state["context_data"] = contexts
+
+        agent_responses = {}
+
+        if execution_plan["type"] == "parallel":
+            # execute agents in parallel
+            agent_responses = await self._execute_agents_parallel(
+                agents, state, contexts
+            )
+        else:
+            # execute agents sequentially
+            agent_responses = await self._execute_agents_sequential(
+                agents, state, contexts, execution_plan["sequence"]
+            )
+        
+        state["agent_responses"].update(agent_responses)
+        state["processing_steps"].append({
+            "step": "agent_execution",
+            "executed_agents": list(agent_responses.keys()),
+            "timestamp": datetime.now().isoformat()
+        })
+
+        return state
 # class BaseAgent(ABC):
 #     """
 #     Defines the common interface and shared functionality that all agents inherit.
