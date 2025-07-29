@@ -178,6 +178,54 @@ class SupervisorAgent:
 
         logger.info(f"Classified intent: {intent.value} (confidence: {confidence:.2f})")
         return state
+    
+    async def llm_fallback_classification(self, state: AgentState) -> AgentState:
+        """Node: Use LLM for better intent classification when confidence is low"""
+        user_query = state["user_query"]
+        
+        # using chain of thought prompting
+        cot_prompt = AgentPrompts.supervisor_chain_of_thought_prompt(user_query)
+
+        return Any
+    
+    async def route_to_agents(self, state: AgentState) -> AgentState:
+        """Node: Determine which agents to use and their execution plan"""
+        intent = IntentType(state["intent"])
+
+        # mapping intent to agents
+        agent_mapping = {
+            IntentType.QUESTION_ANSWER: ["general_agent", "rag_agent"],
+            IntentType.SUMMARIZE: ["summarization_agent", "rag_agent"],
+            IntentType.ANALYZE: ["analysis_agent", "rag_agent"],
+            IntentType.COMPARE: ["comparison_agent", "rag_agent"],
+            IntentType.STUDY_GUIDE: ["study_guide_agent", "content_agent"],
+            IntentType.PRACTICE_PROBLEMS: ["problem_generator_agent"],
+            IntentType.MATH_SOLVE: ["math_agent", "solver_agent"],
+            IntentType.CODE_REVIEW: ["code_agent", "review_agent"]
+        }
+
+        required_agents = agent_mapping.get(intent, ["general_agent"])
+
+        # filter available agents
+        available_agents = [
+            agent for agent in required_agents 
+            if agent in self.available_agents
+        ]
+
+        # determine execution strategy (parallel vs sequential)
+        execution_plan = self._create_execution_plan(available_agents, intent)
+
+        state["metadata"]["required_agents"] = available_agents
+        state["metadata"]["execution_plan"] = execution_plan
+        state["processing_steps"].append({
+            "step": "agent_routing",
+            "agents": available_agents,
+            "execution_plan": execution_plan,
+            "timestamp": datetime.now().isoformat()
+        })
+
+        return state
+
 # class BaseAgent(ABC):
 #     """
 #     Defines the common interface and shared functionality that all agents inherit.
