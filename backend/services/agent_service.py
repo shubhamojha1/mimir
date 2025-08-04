@@ -1,5 +1,5 @@
 from ..agents.base_agent import SupervisorAgent, AgentConfig, IntentType
-from rag_service import RAGService
+from .rag_service import RAGService
 
 from typing import Dict
 
