@@ -1,0 +1,55 @@
+
+# Mimir Project TODO List
+
+This file outlines the main architectural and logical issues that need to be addressed to improve the stability, scalability, and maintainability of the project.
+
+---
+
+### 1. Architectural & Core Logic Issues
+
+- **[High Priority] Integrate the Advanced Intent Detection System:**
+  - **Issue:** The `SupervisorAgent` currently uses a simple, keyword-based intent classifier. A much more powerful, ML-based intent detection system exists in `backend/models/intent_detection/` but is not used in the main chat workflow.
+  - **Action:**
+    - Replace the `IntentClassifier` class inside `backend/agents/base_agent.py` with the `IntentDetectionSystem` from `backend/models/intent_detection/intent_detection_system.py`.
+    - The `SupervisorAgent` should call this new system to get much more accurate intent predictions.
+    - Remove the now-redundant simple classifier.
+
+- **[High Priority] Replace In-Memory Chat Session Storage:**
+  - **Issue:** Chat sessions are stored in a global dictionary in `backend/api/chat.py`, which is not scalable and will lose all data on restart.
+  - **Action:**
+    - Integrate a persistent storage solution like Redis for caching session data. The `redis_url` is already in the settings, so the backend is prepared for this.
+    - Modify the `chat` endpoint to use this external store for creating, retrieving, and updating chat sessions.
+
+- **[Medium Priority] Remove Hardcoded Configuration Values:**
+  - **Issue:** Several services contain hardcoded values (e.g., ChromaDB collection name, Ollama model name) instead of using the centralized `settings.py` configuration.
+  - **Action:**
+    - In `backend/services/rag_service.py`, replace hardcoded strings like `'pdfs'` and `'llama3.2'` with the corresponding values from `get_settings()`.
+    - In `backend/api/chat.py`, the default model `'llama2'` is hardcoded. This should also come from the settings file.
+
+- **[Medium Priority] Implement True Agent Specialization:**
+  - **Issue:** The `SupervisorAgent` routes to different conceptual agents, but the execution logic (`_execute_single_agent`) uses a generic prompt for all of them. The specialization is not deeply implemented.
+  - **Action:**
+    - Create separate, concrete agent classes that inherit from a `BaseAgent`.
+    - Each agent should have its own `execute` method with specialized logic and prompts.
+    - The `SupervisorAgent` should instantiate and call these specific agent classes instead of using a single generic method.
+
+### 2. Logical & Code-Level Issues
+
+- **[Medium Priority] Enhance Error Handling and Validation:**
+  - **Issue:** While some error handling exists, it could be more robust. For example, the system should gracefully handle failures in the RAG pipeline or agent execution.
+  - **Action:**
+    - Add more specific `try...except` blocks around critical operations like LLM calls, database queries, and agent executions.
+    - Implement fallback strategies. For instance, if the RAG context retrieval fails, the system could fall back to a non-RAG generation mode.
+
+- **[Low Priority] Improve Logging for Traceability:**
+  - **Issue:** Logging is present but could be more structured to provide better traceability for a request's entire lifecycle.
+  - **Action:**
+    - Implement a correlation ID system. Generate a unique ID for each incoming request in the `chat` API and pass it down through all services and agents.
+    - Include this correlation ID in all log messages to easily trace a single request's journey through the system.
+
+- **[High Priority] Add Unit and Integration Tests:**
+  - **Issue:** There is a lack of an automated testing suite, which is critical for maintaining code quality and preventing regressions.
+  - **Action:**
+    - Create a `/tests` directory.
+    - Write unit tests for critical components like the `RAGService` (mocking external dependencies), the `IntentDetectionSystem`, and the `SupervisorAgent`'s routing logic.
+    - Write integration tests for the API endpoints to ensure the end-to-end workflow is functioning correctly.
