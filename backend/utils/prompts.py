@@ -71,7 +71,7 @@ class RAGPrompts:
     
 class SupervisorPrompts:
     """Manages prompt templates for all the agents"""
-    def chain_of_thought_prompt(self, query) -> str:
+    def chain_of_thought_prompt(query) -> str:
         cot_prompt = f"""
                 I need to carefully analyze this user query to understand their intent. Let me think through this step by step.
 
@@ -130,7 +130,7 @@ class SupervisorPrompts:
         """
         return cot_prompt
     
-    def clarification_prompt(self, query, clarifications) -> str:
+    def clarification_prompt(query, clarifications) -> str:
         prompt = f"""
         The following clarifications are needed to better answer the user's question:
         
@@ -142,7 +142,7 @@ class SupervisorPrompts:
         """
         return prompt
 
-    def consolidation_prompt(self, query, intent) -> str:
+    def consolidation_prompt(query, intent) -> str:
         prompt = f"""
         Consolidate the following agent responses into a single, coherent response 
         that addresses the user's original query.
