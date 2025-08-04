@@ -11,10 +11,14 @@ from ..config.settings import get_settings
 from ..utils.prompts import SupervisorPrompts
 
 from langgraph.graph import StateGraph, END
-from langgraph.prebuilt import ToolExecutor
+# from langgraph.prebuilt import ToolExecutor
 from langgraph.checkpoint.memory import MemorySaver
 
 logger = logging.getLogger(__name__)
+
+def merge_dict(dict1: Dict, dict2: Dict) -> Dict:
+    """Merge two dictionaries for agent responses"""
+    return {**dict1, **dict2}
 
 # State management
 class AgentState(TypedDict):
@@ -24,12 +28,12 @@ class AgentState(TypedDict):
     intent_confidence: float
     agent_responses: Dict[str, Any]
     context_data: List[Dict[str, Any]]
-    clatifications_needed: List[str]
+    clarifications_needed: List[str]
     processing_steps: List[Dict[str, Any]]
     final_response: str
     metadata: Dict[str, Any]
     # Reducer for agent_responses to accumulate results
-    agent_responses: Annotated[Dict, operator.add]
+    agent_responses: Annotated[Dict, merge_dict]
 
 class IntentType(Enum):
     """Supported Intent Types"""
@@ -178,16 +182,51 @@ class SupervisorAgent:
 
         logger.info(f"Classified intent: {intent.value} (confidence: {confidence:.2f})")
         return state
-    
+
     async def llm_fallback_classification(self, state: AgentState) -> AgentState:
         """Node: Use LLM for better intent classification when confidence is low"""
         user_query = state["user_query"]
-        
-        # using chain of thought prompting
-        cot_prompt = SupervisorPrompts.chain_of_thought_prompt(user_query)
 
-        return Any
-    
+        # using chain of thought prompting
+        cot_prompt = SupervisorPrompts.chain_of_thought_prompt(query=user_query)
+
+        try:
+            llm_response = await self.rag_service._generate_llm_response(
+                "You are an expert at understanding user intents. Think step by step through your reasoning process.",
+                cot_prompt
+            )
+            
+            # Extract the final answer from the CoT response
+            lines = llm_response.strip().split('\n')
+            final_answer = None
+            
+            for line in lines:
+                if line.startswith('Final answer:'):
+                    final_answer = line.replace('Final answer:', '').strip()
+                    break
+            
+            if final_answer and ',' in final_answer:
+                parts = final_answer.split(',')
+                if len(parts) == 2:
+                    intent = parts[0].strip()
+                    confidence = float(parts[1].strip())
+                    
+                    state["intent"] = intent
+                    state["intent_confidence"] = confidence
+                    state["processing_steps"].append({
+                        "step": "llm_cot_classification",
+                        "intent": intent,
+                        "confidence": confidence,
+                        "reasoning": llm_response,  # Store the full CoT reasoning
+                        "timestamp": datetime.now().isoformat()
+                    })
+                
+        except Exception as e:
+            logger.error(f"LLM CoT classification failed: {e}")
+            # Keep original classification
+        
+        return state
+
     async def route_to_agents(self, state: AgentState) -> AgentState:
         """Node: Determine which agents to use and their execution plan"""
         intent = IntentType(state["intent"])
@@ -225,14 +264,14 @@ class SupervisorAgent:
         })
 
         return state
-    
+
     async def execute_agents(self, state: AgentState) -> AgentState:
         """Node: Execute the required agentrs according to the plan"""
         agents = state["metadata"]["required_agents"]
         execution_plan = state["metadata"]["execution_plan"]
 
         # Retrieve context for agents
-        contexts = await self._retrieve_context_for_agents()
+        contexts = await self._retrieve_context_for_agents(state=state)
         state["context_data"] = contexts
 
         agent_responses = {}
@@ -292,7 +331,7 @@ class SupervisorAgent:
         """Node: Validate the combined agent outputs against user intent"""
         intent = state["intent"]
         agent_responses = state["agent_responses"]
-        
+
         # Basic validation checks
         validation_results = {
             "has_responses": len(agent_responses) > 0,
@@ -300,14 +339,14 @@ class SupervisorAgent:
             "quality_threshold_met": True,  # Quality assessment would go here
             "completeness_check": True  # Completeness assessment would go here
         }
-        
+
         state["metadata"]["validation_results"] = validation_results
         state["processing_steps"].append({
             "step": "output_validation",
             "validation_results": validation_results,
             "timestamp": datetime.now().isoformat()
         })
-        
+
         return state
     
     async def consolidate_response(self, state: AgentState) -> AgentState:
@@ -316,12 +355,12 @@ class SupervisorAgent:
         intent = state["intent"]
         
         # Create consolidation prompt
-        consolidation_prompt = SupervisorPrompts.consolidation_prompt(state['user_query'], intent)
+        consolidation_prompt = SupervisorPrompts.consolidation_prompt(query=state['user_query'], intent=intent)
         
         for agent_name, response in agent_responses.items():
             consolidation_prompt += f"\n{agent_name}: {response}\n"
         
-        consolidation_prompt += SupervisorPrompts.additonal_consoludation_prompt()
+        consolidation_prompt += SupervisorPrompts.additional_consolidation_prompt()
         
         try:
             final_response = await self.rag_service._generate_llm_response(
@@ -343,7 +382,17 @@ class SupervisorAgent:
             state["final_response"] = primary_response
         
         return state
-    
+
+    # Conditional edge functions
+    def should_use_llm_fallback(self, state: AgentState) -> str:
+        """Determine if we need LLM fallback for intent classification"""
+        confidence = state["intent_confidence"]
+        return "use_llm" if confidence < self.confidence_threshold else "proceed"
+
+    def needs_clarification(self, state: AgentState) -> str:
+        """Check if any agents requested clarification"""
+        return "clarify" if state["clarifications_needed"] else "validate"
+
     # helper functions
     def _create_execution_plan(self, agents: List[str], intent: IntentType) -> Dict[str, Any]:
         """Create execution plan for agents"""
@@ -355,7 +404,7 @@ class SupervisorAgent:
                 "type": "sequential",
                 "sequence": agents # TODO: could (how?) implement dependency based ordering
             }
-        
+
     async def _retrieve_context_for_agents(self, state: AgentState) -> List[Dict[str, Any]]:
         """Retrieve relevant context for agent execution"""
         # TODO: need to decide what context to retrieve
@@ -371,7 +420,7 @@ class SupervisorAgent:
         except Exception as e:
             logger.error(f"Error retrieving context")
 
-    async def _execute_agents_in_parallel(self,
+    async def _execute_agents_parallel(self,
                                           agents: List[str],
                                           state: AgentState,
                                           contexts: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -464,7 +513,7 @@ class SupervisorAgent:
         
         # Execute the graph
         config = {"thread_id": f"user_session_{datetime.now().timestamp()}"}
-        final_state = await self.graph.ainvoke(initial_state, config)
+        final_state = await self.graph.ainvoke(initial_state, config) # ainvoke = asynchronous invoke
         
         return {
             "response": final_state["final_response"],
@@ -492,12 +541,12 @@ class SupervisorAgent:
 #         self.rag_service = rag_service
 #         self.settings = get_settings()
 #         self.prompts = SupervisorPrompts()
-        
+
 #         # Agent-specific configuration
 #         self.max_context_length = 4000  # Maximum context to include in prompts
 #         self.confidence_threshold = 0.6  # Minimum confidence for responses
-        
+
 #         # Initialize agent-specific settings
 #         self._initialize_agent()
-        
+
 #         logger.info(f"{self.agent_type} agent initialized")
