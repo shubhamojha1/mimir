@@ -10,3 +10,5 @@ need to look for ways to scrape/search online for more accurate results
 also
 supervised fine tuning, reinforcement fine tuning, direct preference optimization
 rlhf?
+
+**implement web sockets for chat**
