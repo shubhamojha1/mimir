@@ -362,9 +362,12 @@ class SupervisorAgent:
         
         consolidation_prompt += SupervisorPrompts.additional_consolidation_prompt()
         
+        # Get the full system prompt
+        system_prompt = SupervisorPrompts.system_prompt()
+
         try:
             final_response = await self.rag_service._generate_llm_response(
-                "You are expert at consolidating multiple perspectives into coherent responses.",
+                system_prompt,
                 consolidation_prompt
             )
             
